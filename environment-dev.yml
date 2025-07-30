@@ -1,0 +1,21 @@
+name: conda-pack-dev
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - setuptools
+  - wheel
+  - setuptools-scm
+  - pytest
+  - pytest-cov
+  - black
+  - isort
+  - flake8
+  - pre-commit
+  - sphinx
+  - sphinx-rtd-theme
+  - myst-parser
+  - pip:
+    - -e .[dev]

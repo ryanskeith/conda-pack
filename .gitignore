@@ -5,9 +5,16 @@ dist
 .gitignore.swp
 .cache
 .coverage
+.coverage.*
+.DS_Store
 htmlcov/
 .pytest_cache/
 __pycache__/
+coverage.xml
 # pixi environments
 .pixi
 *.egg-info
+
+
+# Generated version file
+conda_pack/_version.py
