@@ -1094,13 +1094,47 @@ _prefix_records = [
 {prefix_records}
 ]
 
+# Store the current prefix information for relocatability
+import os
+_unpack_info_file = os.path.join(os.path.dirname(__file__), '.conda-unpack-info')
+
+def _load_unpack_info():
+    \"\"\"Load the current unpack information from the info file.\"\"\"
+    if os.path.exists(_unpack_info_file):
+        try:
+            with open(_unpack_info_file, 'r') as f:
+                return f.read().strip()
+        except (OSError, IOError):
+            pass
+    return None
+
+def _save_unpack_info(prefix):
+    \"\"\"Save the current unpack information to the info file.\"\"\"
+    try:
+        with open(_unpack_info_file, 'w') as f:
+            f.write(prefix)
+    except (OSError, IOError):
+        pass
+
+def _update_prefix_records_for_relocation(old_prefix, new_prefix):
+    \"\"\"Update _prefix_records to reflect the new prefix for future relocations.\"\"\"
+    global _prefix_records
+    updated_records = []
+    for path, placeholder, mode in _prefix_records:
+        # If the placeholder matches the old prefix, update it to the new prefix
+        if placeholder == old_prefix:
+            updated_records.append((path, new_prefix, mode))
+        else:
+            updated_records.append((path, placeholder, mode))
+    _prefix_records = updated_records
+
 if __name__ == '__main__':
-    import os
     import argparse
     parser = argparse.ArgumentParser(
             prog='conda-unpack',
             description=('Finish unpacking the environment after unarchiving. '
-                         'Cleans up absolute prefixes in any remaining files'))
+                         'Cleans up absolute prefixes in any remaining files. '
+                         'Can be run multiple times to relocate the environment.'))
     parser.add_argument('--version',
                         action='store_true',
                         help='Show version then exit')
@@ -1111,11 +1145,27 @@ if __name__ == '__main__':
     else:
         script_dir = os.path.dirname(__file__)
         new_prefix = os.path.abspath(os.path.dirname(script_dir))
+
+        # Check if this is a relocation (not the first unpack)
+        current_prefix = _load_unpack_info()
+
+        if current_prefix and current_prefix != new_prefix:
+            # This is a relocation - update prefix records to use the current prefix
+            print('Relocating environment from {{}} to {{}}'.format(current_prefix, new_prefix))
+            _update_prefix_records_for_relocation(current_prefix, new_prefix)
+        else:
+            print('Unpacking environment to {{}}'.format(new_prefix))
+
+        # Process all files with prefix records
         for path, placeholder, mode in _prefix_records:
             new_path = os.path.join(new_prefix, path)
             if on_win:
                 new_path = new_path.replace('\\\\', '/')
             update_prefix(new_path, new_prefix, placeholder, mode=mode)
+
+        # Save the new prefix information for future relocations
+        _save_unpack_info(new_prefix)
+        print('Environment unpacked successfully!')
 """
 
 
@@ -1218,12 +1268,33 @@ class Packer:
             if self.has_dest:
                 data = replace_prefix(data, file_mode, placeholder, self.dest)
             else:
+                # Check if the original data contains hardcoded prefixes before any processing
+                # Use the simple approach:
+                #     Check if the file contains the original environment prefix
+                original_contains_prefix = False
+                detected_prefix = None
+
+                if placeholder and placeholder in data.decode("utf-8", errors="ignore"):
+                    original_contains_prefix = True
+                    detected_prefix = placeholder
+                elif file_mode == "text":
+                    # Check if the file contains the original environment prefix
+                    text_data = data.decode("utf-8", errors="ignore")
+                    if self.prefix in text_data:
+                        original_contains_prefix = True
+                        detected_prefix = self.prefix
+
                 if file_mode == 'text' and file.target.startswith(BIN_DIR):
-                    data, fixed = rewrite_shebang(data, file.target, placeholder)
-                else:
-                    fixed = False
-                if not fixed:
-                    self.prefixes.append((file.target, placeholder, file_mode))
+                    data, _ = rewrite_shebang(data, file.target, placeholder)
+
+                # Always add files with hardcoded prefixes to _prefix_records for conda-unpack
+                # to handle, even if the shebang was successfully rewritten. This ensures
+                # that any remaining hardcoded paths in the file are fixed by conda-unpack.
+                if original_contains_prefix:
+                    # Use the detected prefix if available,
+                    # otherwise fall back to the original placeholder
+                    prefix_to_use = detected_prefix if detected_prefix else placeholder
+                    self.prefixes.append((file.target, prefix_to_use, file_mode))
 
         self.archive.add_bytes(file.source, data, file.target)
 

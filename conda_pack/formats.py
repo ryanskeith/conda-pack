@@ -327,7 +327,7 @@ class TarArchive(ArchiveBase):
 
     def _add(self, source, target):
         def filter_mtime(tarinfo):
-            tarinfo.mtime = self.mtime
+            tarinfo.mtime = self.mtime if self.mtime is not None else time.time()
             return tarinfo
 
         if target == "bin/conda-unpack":
